@@ -13,7 +13,7 @@ class Maze {
     constructor(width, height) {
         this.width = width;
         this.height = height;
-        this.showSolution = true;
+        this.showSolution = false;
 
         this.player = 0;
 
@@ -108,7 +108,6 @@ class Maze {
         if (this.neighbors[this.player].includes(target)) {
             this.player = target;
             this.draw();
-            console.log("moved");
         }
     }
 
