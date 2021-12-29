@@ -1,5 +1,8 @@
 let maze;
-let showSolution = false;
+const SCALE = 20;
+let canvas;
+let context;
+
 
 class Maze {
     /**
@@ -10,7 +13,9 @@ class Maze {
     constructor(width, height) {
         this.width = width;
         this.height = height;
-        this.scale = 20;
+        this.showSolution = true;
+
+        this.player = 0;
 
         const vertices = new Set();
         vertices.add(0);
@@ -33,21 +38,31 @@ class Maze {
                     .map(p => [v2, height * p.x + p.y])
             );
         }
+
+        // Shuffle some edges to make the solution a bit less direct
+        for (let i = 0; i < Math.max(width, height); i++) {
+            this.flip();
+        }
+
+        canvas.width = SCALE * width;
+        canvas.height = SCALE * height;
+        context.scale(SCALE, SCALE);
     }
 
     /**
      * Draws the maze on the canvas
      */
     draw() {
-        const canvas = document.getElementById("maze");
-        const context = canvas.getContext('2d');
-        canvas.width = this.scale * this.width;
-        canvas.height = this.scale * this.height;
-        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.fillRect(0, 0, this.width, this.height);
+
+        context.save();
+        context.lineCap = "round";
+        context.translate(.5, .5);
+
+        // Draw the maze corridors
         context.beginPath();
         context.strokeStyle = '#ffffff';
-        context.lineCap = "round";
-        context.lineWidth = this.scale / 2;
+        context.lineWidth = .5;
         for (let i = 0; i < this.width * this.height; i++) {
             for (const j of this.neighbors[i]) {
                 if (i < j) {
@@ -55,12 +70,46 @@ class Maze {
                     const y1 = i % this.height;
                     const x2 = ~~(j / this.height);
                     const y2 = j % this.height;
-                    context.moveTo(this.scale * x1 + this.scale / 2, this.scale * y1 + this.scale / 2);
-                    context.lineTo(this.scale * x2 + this.scale / 2, this.scale * y2 + this.scale / 2);
+                    context.moveTo(x1, y1);
+                    context.lineTo(x2, y2);
                 }
             }
         }
         context.stroke();
+
+        // Draw the solution
+        if (this.showSolution) {
+            const path = this.findPath(this.player, this.width * this.height - 1);
+            context.strokeStyle = '#ff0000';
+            context.lineWidth = .25;
+            context.beginPath();
+            let [x, y] = this.coords(path[0]);
+            context.moveTo(x, y);
+            for (let p of path) {
+                [x, y] = this.coords(p);
+                context.lineTo(x, y);
+            }
+            context.stroke();
+        }
+
+        // Draw the player
+        context.beginPath();
+        const [px, py] = this.coords(this.player);
+        context.fillStyle = '#00ff00';
+        context.moveTo(px, py);
+        context.arc(px, py, .5, 0, 2 * Math.PI);
+        context.fill();
+        context.restore();
+    }
+
+    move(dx, dy) {
+        const [x, y] = this.coords(this.player);
+        const target = this.vertex(x + dx, y + dy);
+        if (this.neighbors[this.player].includes(target)) {
+            this.player = target;
+            this.draw();
+            console.log("moved");
+        }
     }
 
     /**
@@ -112,53 +161,117 @@ class Maze {
     }
 
     /**
+     * Toggles display of solution on or off
+     */
+    toggleSolution() {
+        this.showSolution = !this.showSolution;
+        this.draw();
+    }
+
+    /**
      * Draws a path on the canvas
      * @param {[number]} path list of vertices along the path
      */
     drawPath(path) {
-        const canvas = document.getElementById('maze');
-        const context = canvas.getContext('2d');
+        context.save();
         context.beginPath();
         context.strokeStyle = '#ff0000';
         context.lineCap = "round";
-        context.lineWidth = this.scale / 4;
+        context.lineWidth = .25;
+        context.translate(.5, .5);
         let [x, y] = this.coords(path[0]);
-        context.moveTo(x * this.scale + this.scale / 2, y * this.scale + this.scale / 2);
+        context.moveTo(x, y);
         for (let p of path) {
             [x, y] = this.coords(p);
-            context.lineTo(x * this.scale + this.scale / 2, y * this.scale + this.scale / 2);
+            context.lineTo(x, y);
         }
         context.stroke();
+        context.restore();
     }
 
     /**
-     * Draws the path from top left (0, 0) to bottom right (width - 1, height - 1)
+     * Removes one edge from the solution, and adds another random edge to reconnect the graph
      */
-    drawSolution() {
-        const path = this.findPath(0, this.vertex(this.width - 1, this.height - 1));
-        this.drawPath(path);
+    flip() {
+        // Remove a random edge on the solution
+        const goal = this.vertex(this.width - 1, this.height - 1);
+        const path = this.findPath(0, goal);
+        let i = ~~(Math.random() * (path.length - 1));
+        let u = path[i];
+        let v = path[i + 1];
+        this.neighbors[u] = this.neighbors[u].filter(x => x !== v);
+        this.neighbors[v] = this.neighbors[v].filter(x => x !== u);
+
+        // Make list of edges that reconnect the graph
+        const component = this.getConnexComponent(0);
+        const border = [];
+        for (const u of component) {
+            const [x1, y1] = this.coords(u);
+            for (const [x2, y2] of [[x1 - 1, y1], [x1 + 1, y1], [x1, y1 - 1], [x1, y1 + 1]]) {
+                if (0 <= x2 && x2 < this.width && 0 <= y2 && y2 < this.height) {
+                    const v = this.vertex(x2, y2);
+                    if (!component.has(v)) {
+                        border.push([u, v]);
+                    }
+                }
+            }
+        }
+        // Add a random edge from the border to reconnect the graph
+        i = ~~(Math.random() * border.length);
+        [u, v] = border[i];
+        this.neighbors[u].push(v);
+        this.neighbors[v].push(u);
+        this.draw();
     }
-}
 
-function toggleSolution() {
-    showSolution = !showSolution;
-    update();
-}
-
-function update() {
-    maze.draw();
-    if (showSolution) {
-        maze.drawSolution();
+    /**
+     * Returns the connex component of the graph containing the given vertex
+     * @param {number} vertex index of vertex in the component
+     * @returns {Set<number>} set of vertices in the component
+     */
+    getConnexComponent(vertex) {
+        const component = new Set([vertex]);
+        const border = [vertex];
+        while (border.length > 0) {
+            const v = border.pop();
+            for (const w of this.neighbors[v]) {
+                if (!component.has(w)) {
+                    component.add(w);
+                    border.unshift(w);
+                }
+            }
+        }
+        return component;
     }
 }
 
 window.addEventListener("load", e => {
+    canvas = document.getElementById('maze');
+    context = canvas.getContext('2d');
     maze = new Maze(40, 30);
-    update();
+    maze.draw();
 });
 
-window.addEventListener("keypress", e => {
-    if (e.key === "s") {
-        toggleSolution();
+window.addEventListener("keydown", e => {
+    console.log(e.key);
+    switch (e.key) {
+        case 's':
+            maze.toggleSolution();
+            break;
+        case 'f':
+            maze.flip();
+            break;
+        case 'ArrowUp':
+            maze.move(0, -1);
+            break;
+        case 'ArrowDown':
+            maze.move(0, 1);
+            break;
+        case 'ArrowLeft':
+            maze.move(-1, 0);
+            break;
+        case 'ArrowRight':
+            maze.move(1, 0);
+            break;
     }
 });
