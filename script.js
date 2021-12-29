@@ -253,7 +253,6 @@ window.addEventListener("load", e => {
 });
 
 window.addEventListener("keydown", e => {
-    console.log(e.key);
     switch (e.key) {
         case 's':
             maze.toggleSolution();
